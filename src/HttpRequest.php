@@ -117,6 +117,16 @@ class HttpRequest extends CHttpRequest
     private $_headers;
 
     /**
+     * @var array[]|null
+     */
+    private $_secureForwardedHeaderParts;
+
+    /**
+     * @var array[]|null
+     */
+    private $_secureForwardedHeaderTrustedParts;
+
+    /**
      * @var array|null manually set REST parameters.
      */
     private $_restParams;
@@ -208,6 +218,112 @@ class HttpRequest extends CHttpRequest
     }
 
     /**
+     * Returns decoded forwarded header.
+     *
+     * @return array[]
+     */
+    protected function getSecureForwardedHeaderParts(): array
+    {
+        if ($this->_secureForwardedHeaderParts !== null) {
+            return $this->_secureForwardedHeaderParts;
+        }
+        if (count(preg_grep('/^forwarded$/i', $this->secureHeaders)) === 0) {
+            return $this->_secureForwardedHeaderParts = [];
+        }
+
+        /*
+         * First header is always correct, because proxy CAN add headers
+         * after last one is found.
+         * Keep in mind that it is NOT enforced, therefore we cannot be
+         * sure, that this is really a first one.
+         *
+         * FPM keeps last header sent which is a bug. You need to merge
+         * headers together on your web server before letting FPM handle it
+         * @see https://bugs.php.net/bug.php?id=78844
+         */
+        $forwarded = $this->getHeaders()->get('Forwarded', '');
+        if ($forwarded === '') {
+            return $this->_secureForwardedHeaderParts = [];
+        }
+
+        preg_match_all('/(?:[^",]++|"[^"]++")+/', $forwarded, $forwardedElements);
+
+        foreach ($forwardedElements[0] as $forwardedPairs) {
+            preg_match_all('/(?P<key>\w+)\s*=\s*(?:(?P<value>[^",;]*[^",;\s])|"(?P<value2>[^"]+)")/', $forwardedPairs, $matches, PREG_SET_ORDER);
+            $this->_secureForwardedHeaderParts[] = array_reduce($matches, function ($carry, $item) {
+                $value = $item['value'];
+                if (isset($item['value2']) && $item['value2'] !== '') {
+                    $value = $item['value2'];
+                }
+                $carry[strtolower($item['key'])] = $value;
+
+                return $carry;
+            }, []);
+        }
+
+        return $this->_secureForwardedHeaderParts;
+    }
+
+    /**
+     * Gets first `Forwarded` header value for token
+     *
+     * @param string $token Header token
+     * @return string|null
+     */
+    protected function getSecureForwardedHeaderTrustedPart($token): ?string
+    {
+        $token = strtolower($token);
+
+        if ($parts = $this->getSecureForwardedHeaderTrustedParts()) {
+            $lastElement = array_pop($parts);
+            if ($lastElement && isset($lastElement[$token])) {
+                return $lastElement[$token];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Gets only trusted `Forwarded` header parts.
+     *
+     * @return array[]
+     */
+    protected function getSecureForwardedHeaderTrustedParts(): array
+    {
+        if ($this->_secureForwardedHeaderTrustedParts !== null) {
+            return $this->_secureForwardedHeaderTrustedParts;
+        }
+
+        $trustedHosts = [];
+        foreach ($this->trustedHosts as $trustedCidr => $trustedCidrOrHeaders) {
+            if (!is_array($trustedCidrOrHeaders)) {
+                $trustedCidr = $trustedCidrOrHeaders;
+            }
+            $trustedHosts[] = $trustedCidr;
+        }
+
+        $this->_secureForwardedHeaderTrustedParts = array_filter(
+            $this->getSecureForwardedHeaderParts(),
+            function ($headerPart) use ($trustedHosts) {
+                if (!isset($headerPart['for'])) {
+                    return true;
+                }
+
+                foreach ($trustedHosts as $trustedHost) {
+                    if (!$this->checkIpMatch($headerPart['for'], $trustedHost)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        );
+
+        return $this->_secureForwardedHeaderTrustedParts;
+    }
+
+    /**
      * @param string $ip IP address to compare against the pattern.
      * @param string $pattern pattern to compare IP address with.
      * @return bool whether the given IP matches the pattern.
@@ -226,6 +342,29 @@ class HttpRequest extends CHttpRequest
     }
 
     /**
+     * @param string|null $ip IP address to be validated.
+     * @return bool weather given IP is in valid format.
+     */
+    protected function validateIpFormat(?string $ip): bool
+    {
+        if ($ip === null) {
+            return false;
+        }
+
+        // IP v4
+        if (preg_match('/^(?:(?:2(?:[0-4]\d|5[0-5])|[0-1]?\d?\d)\.){3}(?:(?:2([0-4]\d|5[0-5])|[0-1]?\d?\d))$/', $ip)) {
+            return true;
+        }
+
+        // IP v6
+        if (preg_match('/^(([\da-fA-F]{1,4}:){7}[\da-fA-F]{1,4}|([\da-fA-F]{1,4}:){1,7}:|([\da-fA-F]{1,4}:){1,6}:[\da-fA-F]{1,4}|([\da-fA-F]{1,4}:){1,5}(:[\da-fA-F]{1,4}){1,2}|([\da-fA-F]{1,4}:){1,4}(:[\da-fA-F]{1,4}){1,3}|([\da-fA-F]{1,4}:){1,3}(:[\da-fA-F]{1,4}){1,4}|([\da-fA-F]{1,4}:){1,2}(:[\da-fA-F]{1,4}){1,5}|[\da-fA-F]{1,4}:((:[\da-fA-F]{1,4}){1,6})|:((:[\da-fA-F]{1,4}){1,7}|:)|fe80:(:[\da-fA-F]{0,4}){0,4}%[\da-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?\d)?\d)\.){3}(25[0-5]|(2[0-4]|1?\d)?\d)|([\da-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?[\d])?\d)\.){3}(25[0-5]|(2[0-4]|1?\d)?\d))$/', $ip)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Returns the IP on the other end of this connection.
      * This is always the next hop, any headers are ignored.
      *
@@ -237,17 +376,87 @@ class HttpRequest extends CHttpRequest
     }
 
     /**
-     * {@inheritDoc}
+     * Returns the user IP address.
+     * The IP is determined using headers and / or `$_SERVER` variables.
+     *
+     * @return string|null user IP address, null if not available
      */
-    public function getUserHostAddress()
+    public function getUserIp()
     {
-        foreach ($this->ipHeaders as $header) {
-            if (($ip = $this->getHeaders()->get($header)) !== null) {
+        $ip = $this->getSecureForwardedHeaderTrustedPart('for');
+        if (
+            $ip !== null && preg_match(
+                '/^\[?(?P<ip>(?:(?:(?:[0-9a-f]{1,4}:){1,6}(?:[0-9a-f]{1,4})?(?:(?::[0-9a-f]{1,4}){1,6}))|(?:\d{1,3}\.){3}\d{1,3}))\]?(?::(?P<port>\d+))?$/',
+                $ip,
+                $matches
+            )
+        ) {
+            $ip = $this->getUserIpFromIpHeader($matches['ip']);
+            if ($ip !== null) {
                 return $ip;
             }
         }
 
+        foreach ($this->ipHeaders as $header) {
+            if (($ipHeader = $this->getHeaders()->get($header)) !== null) {
+                $ip = $this->getUserIpFromIpHeader($ipHeader);
+                if ($ip !== null) {
+                    return $ip;
+                }
+            }
+        }
+
         return $this->getRemoteIP();
+    }
+
+    /**
+     * Return user IP's from IP header.
+     *
+     * @param string $ips comma separated IP list
+     * @return string|null IP as string. Null is returned if IP can not be determined from header.
+     * @see getUserHost()
+     * @see $ipHeaders
+     * @see getTrustedHeaders()
+     */
+    protected function getUserIpFromIpHeader($ips)
+    {
+        $ips = trim($ips);
+        if ($ips === '') {
+            return null;
+        }
+
+        $ips = preg_split('/\s*,\s*/', $ips, -1, PREG_SPLIT_NO_EMPTY);
+        krsort($ips);
+        $resultIp = null;
+        foreach ($ips as $ip) {
+            if (!$this->validateIpFormat($ip)) {
+                break;
+            }
+            $resultIp = $ip;
+            $isTrusted = false;
+            foreach ($this->trustedHosts as $trustedCidr => $trustedCidrOrHeaders) {
+                if (!is_array($trustedCidrOrHeaders)) {
+                    $trustedCidr = $trustedCidrOrHeaders;
+                }
+                if ($this->checkIpMatch($ip, $trustedCidr)) {
+                    $isTrusted = true;
+                    break;
+                }
+            }
+            if (!$isTrusted) {
+                break;
+            }
+        }
+
+        return $resultIp;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getUserHostAddress()
+    {
+        return $this->getUserIp();
     }
 
     /**
@@ -273,10 +482,8 @@ class HttpRequest extends CHttpRequest
             return true;
         }
 
-        if (($forwardedHeader = $this->getHeaders()->get('Forwarded')) !== null) {
-            if (stripos($forwardedHeader, 'proto=https') !== false) {
-                return true;
-            }
+        if (($proto = $this->getSecureForwardedHeaderTrustedPart('proto')) !== null) {
+            return strcasecmp($proto, 'https') === 0;
         }
 
         foreach ($this->secureProtocolHeaders as $header => $values) {
