@@ -3,7 +3,7 @@
 namespace yii1tech\web\helpers;
 
 /**
- * Class IpHelper provides a set of IP-related static methods.
+ * IpHelper provides a set of IP-related static methods.
  *
  * @author Paul Klimov <klimov.paul@gmail.com>
  * @since 1.0

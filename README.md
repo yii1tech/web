@@ -39,6 +39,10 @@ Usage
 -----
 
 This extension provides the enhanced components for the web request processing in Yii1 application.
+
+In particular, it allows correct and secure processing of the "forwarded" HTTP headers, which is crucial
+for distributed application with load balancer.
+
 Application configuration example:
 
 ```php
@@ -49,10 +53,20 @@ return [
         'request' => [
             'class' => yii1tech\web\HttpRequest::class,
             'trustedHosts' => [
-                '192.168.0.0/24',
+                '192.168.0.0/24', // trust "forwarded" headers coming from IP addresses in range `192.168.0.0-192.168.0.254`
             ],
         ],
     ],
     // ...
 ];
+```
+
+Usage example:
+
+```php
+<?php
+
+var_dump(Yii::app()->request->getRemoteIP()); // returns IP of current HTTP connection, e.g. load balancer, outputs '192.168.0.1'
+var_dump(Yii::app()->request->getUserIp()); // returns user IP address, considering "forwarded" headers, outputs '162.55.123.243'
+var_dump(Yii::app()->request->getUserHostAddress()); // alias of `getUserIp()`
 ```
