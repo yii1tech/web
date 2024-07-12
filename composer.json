@@ -1,7 +1,7 @@
 {
     "name": "yii1tech/web",
     "description": "Provides the enhanced components for the web request processing in Yii1 application",
-    "keywords": ["yii1", "web", "http", "request", "cookie", "load balancer"],
+    "keywords": ["yii1", "web", "http", "request", "load balancer", "ip"],
     "license": "BSD-3-Clause",
     "support": {
         "issues": "https://github.com/yii1tech/web/issues",
