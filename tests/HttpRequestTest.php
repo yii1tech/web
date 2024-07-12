@@ -129,7 +129,7 @@ class HttpRequestTest extends TestCase
 
         $request = new HttpRequest();
         $request->trustedHosts = [
-            '192.168.0.1',
+            '192.168.0.0/24',
         ];
         $request->secureHeaders = [
             'Front-End-Https',
@@ -308,7 +308,7 @@ class HttpRequestTest extends TestCase
 
         $request = new HttpRequest();
         $request->trustedHosts = [
-            '192.168.0.1',
+            '192.168.0.0/24',
         ];
         $request->secureHeaders = [
             'Front-End-Https',

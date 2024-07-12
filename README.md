@@ -48,6 +48,9 @@ return [
     'components' => [
         'request' => [
             'class' => yii1tech\web\HttpRequest::class,
+            'trustedHosts' => [
+                '192.168.0.0/24',
+            ],
         ],
     ],
     // ...

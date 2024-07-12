@@ -3,9 +3,18 @@
 namespace yii1tech\web;
 
 use CHttpRequest;
+use yii1tech\web\helpers\IpHelper;
 
 /**
+ * HttpRequest is an enhanced version of the standard {@see \CHttpRequest}.
+ *
+ * It allows correct and secure processing of the "forwarded" HTTP headers, which is crucial
+ * for distributed application with load balancer.
+ *
  * @property-read \yii1tech\web\HeaderCollection $headers The header collection.
+ * @property-read string|null $remoteIP Remote IP address, `null` if not available.
+ * @property-read string|null $userIP User IP address, null if not available.
+ * @property array $restParams the request parameters.
  *
  * @author Paul Klimov <klimov.paul@gmail.com>
  * @since 1.0
@@ -21,12 +30,12 @@ class HttpRequest extends CHttpRequest
      * {@see $secureHeaders} to determine which headers are allowed to be sent by a specified host.
      * The case of the header names must be the same as specified in {@see $secureHeaders}.
      *
-     * For example:
+     * For example, to trust all headers listed in [[secureHeaders]] for IP addresses
+     * in range `192.168.0.0-192.168.0.254` write the following:
      *
      * ```php
      * [
-     *     '192.168.0.1',
-     *     '192.168.0.2',
+     *     '192.168.0.0/24',
      * ]
      * ```
      *
@@ -38,7 +47,7 @@ class HttpRequest extends CHttpRequest
      * ]
      * ```
      *
-     * You can specify IP address as '*' to match any host.
+     * You can also specify IP address as '*' to match any host.
      *
      * Default is to trust all headers except those listed in {@see $secureHeaders} from all hosts.
      * Matches are tried in order and searching is stopped when IP matches.
@@ -338,7 +347,7 @@ class HttpRequest extends CHttpRequest
             return true;
         }
 
-        return $ip === $pattern;
+        return IpHelper::inRange($ip, $pattern);
     }
 
     /**
@@ -347,21 +356,7 @@ class HttpRequest extends CHttpRequest
      */
     protected function validateIpFormat(?string $ip): bool
     {
-        if ($ip === null) {
-            return false;
-        }
-
-        // IP v4
-        if (preg_match('/^(?:(?:2(?:[0-4]\d|5[0-5])|[0-1]?\d?\d)\.){3}(?:(?:2([0-4]\d|5[0-5])|[0-1]?\d?\d))$/', $ip)) {
-            return true;
-        }
-
-        // IP v6
-        if (preg_match('/^(([\da-fA-F]{1,4}:){7}[\da-fA-F]{1,4}|([\da-fA-F]{1,4}:){1,7}:|([\da-fA-F]{1,4}:){1,6}:[\da-fA-F]{1,4}|([\da-fA-F]{1,4}:){1,5}(:[\da-fA-F]{1,4}){1,2}|([\da-fA-F]{1,4}:){1,4}(:[\da-fA-F]{1,4}){1,3}|([\da-fA-F]{1,4}:){1,3}(:[\da-fA-F]{1,4}){1,4}|([\da-fA-F]{1,4}:){1,2}(:[\da-fA-F]{1,4}){1,5}|[\da-fA-F]{1,4}:((:[\da-fA-F]{1,4}){1,6})|:((:[\da-fA-F]{1,4}){1,7}|:)|fe80:(:[\da-fA-F]{0,4}){0,4}%[\da-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?\d)?\d)\.){3}(25[0-5]|(2[0-4]|1?\d)?\d)|([\da-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?[\d])?\d)\.){3}(25[0-5]|(2[0-4]|1?\d)?\d))$/', $ip)) {
-            return true;
-        }
-
-        return false;
+        return IpHelper::isValid($ip);
     }
 
     /**
